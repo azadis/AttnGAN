@@ -310,3 +310,155 @@ class TextDataset(data.Dataset):
 
     def __len__(self):
         return len(self.filenames)
+
+class TextDatasetCompCUB(TextDataset):
+
+    def load_filenames(self, data_dir, split):
+        filepath = '%s/compositional/splits/split_%s.pkl' % (data_dir, cfg.SPLIT_ID)
+        print(filepath)
+        if os.path.isfile(filepath):
+            with open(filepath, 'rb') as f:
+                split_data = pickle.load(f)
+            filenames = split_data[split]
+            heldout_pairs = split_data['heldout_pairs']
+        return filenames, heldout_pairs
+
+
+    def load_captions(self, data_dir, filenames, wordtoix):
+        filename_to_captions = {}
+        for i in range(len(filenames)):
+            filename = filenames[i]
+            cap_path = '%s/compositional/text/split_%s/%s.txt' % (data_dir,cfg.SPLIT_ID, filenames[i])
+            filename_to_captions[filename] = []
+                
+            with open(cap_path, "r") as f:
+                captions = f.read().decode('utf-8').split('\n')
+                for j, cap in enumerate(captions):
+                    if len(cap) == 0:
+                        continue
+                    cap = cap.replace("\ufffd\ufffd", " ")
+                    # picks out sequences of alphanumeric characters as tokens
+                    # and drops everything else
+                    tokenizer = RegexpTokenizer(r'\w+')
+                    tokens = tokenizer.tokenize(cap.lower())
+                    # print('tokens', tokens)
+                    if len(tokens) == 0:
+                        print('cap', cap)
+                        continue
+
+                    tokens_new = []
+                    for t in tokens:
+                        t = t.encode('ascii', 'ignore').decode('ascii')
+                        if len(t) > 0:
+                            if t in wordtoix:
+                                tokens_new.append(wordtoix[t])
+                    filename_to_captions[filename].append((j, tokens_new))
+
+        return filename_to_captions
+
+
+    def load_text_data(self, data_dir, split):
+        filepath = os.path.join(data_dir, 'captions.pickle')
+        with open(filepath, 'rb') as f:
+            x = pickle.load(f)
+            ixtoword, wordtoix = x[2], x[3]
+            del x
+            n_words = len(ixtoword)
+
+        train_names, self.heldout_pairs = self.load_filenames(data_dir, 'train')
+        val_names, _ = self.load_filenames(data_dir, 'val')
+        test_names, _ = self.load_filenames(data_dir, 'test')
+
+        train_captions = self.load_captions(data_dir, train_names, wordtoix)
+        val_captions = self.load_captions(data_dir, val_names, wordtoix)    
+        test_captions = self.load_captions(data_dir, test_names, wordtoix)
+
+        if split == 'train':
+            # a list of list: each list contains
+            # the indices of words in a sentence
+            captions = train_captions
+            filenames = train_names
+
+        elif split == 'val':
+            captions = val_captions
+            filenames = val_names
+
+        else:  # split=='test'
+            captions = test_captions
+            filenames = test_names
+        return filenames, captions, ixtoword, wordtoix, n_words
+
+    def get_caption(self, caption):
+        caption = np.asarray(caption).astype('int64')
+        num_words = len(caption)
+        caps = np.zeros((cfg.TEXT.WORDS_NUM, 1), dtype='int64')
+        cap_len = num_words
+        if num_words <= cfg.TEXT.WORDS_NUM:
+            caps[:num_words, 0] = caption
+        else:
+            ix = list(np.arange(num_words))  # 1, 2, 3,..., maxNum
+            np.random.shuffle(ix)
+            ix = ix[:cfg.TEXT.WORDS_NUM]
+            ix = np.sort(ix)
+            caps[:, 0] = caption[ix]
+            cap_len = cfg.TEXT.WORDS_NUM
+        return caps, cap_len
+    
+    def get_mis_caption(self, cls_id):
+        mis_match_captions_t = []
+        mis_match_captions = torch.zeros(99, cfg.TEXT.WORDS_NUM)
+        mis_match_captions_len = torch.zeros(99)
+        i = 0
+        while len(mis_match_captions_t) < 99:
+            idx = random.randint(0, self.number_example)
+            mis_key = self.filenames[idx]
+            if key == mis_key:
+                continue
+            captions = self.captions[mis_key]
+            num_caps = len(captions)
+            sent_ix = random.randint(0, num_caps)
+            _, caption = captions[sent_ix]
+
+            caps_t, cap_len_t = self.get_caption(caption)
+            mis_match_captions_t.append(torch.from_numpy(caps_t).squeeze())
+            mis_match_captions_len[i] = cap_len_t
+            i = i +1
+        sorted_cap_lens, sorted_cap_indices = torch.sort(mis_match_captions_len, 0, True)
+        #import ipdb
+        #ipdb.set_trace()
+        for i in range(99):
+            mis_match_captions[i,:] = mis_match_captions_t[sorted_cap_indices[i]]
+        return mis_match_captions.type(torch.LongTensor).cuda(), sorted_cap_lens.type(torch.LongTensor).cuda()
+
+
+
+    def __getitem__(self, index):
+        #
+        key = self.filenames[index]
+        captions = self.captions[key]
+        num_caps = len(captions)
+
+        sent_ix = random.randint(0, num_caps)
+        id, caption = captions[sent_ix]
+        #
+        if self.bbox is not None:
+            bbox = self.bbox[key]
+        else:
+            bbox = None
+
+        data_dir = '%s/CUB_200_2011' % self.data_dir
+        #
+        img_name = '%s/images/%s.jpg' % (data_dir, key)
+
+        imgs = get_imgs(img_name, self.imsize,
+                        bbox, self.transform, normalize=self.norm)
+
+        caps, cap_len = self.get_caption(caption)
+        return imgs, caps, cap_len, id, key
+
+    def __len__(self):
+        return len(self.filenames)
+
+
+
+

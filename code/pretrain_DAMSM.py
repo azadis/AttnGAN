@@ -5,7 +5,7 @@ from miscc.utils import build_super_images
 from miscc.losses import sent_loss, words_loss
 from miscc.config import cfg, cfg_from_file
 
-from datasets import TextDataset
+from datasets import TextDataset,TextDatasetCompCUB
 from datasets import prepare_data
 
 from model import RNN_ENCODER, CNN_ENCODER
@@ -238,9 +238,19 @@ if __name__ == "__main__":
         transforms.Scale(int(imsize * 76 / 64)),
         transforms.RandomCrop(imsize),
         transforms.RandomHorizontalFlip()])
-    dataset = TextDataset(cfg.DATA_DIR, 'train',
-                          base_size=cfg.TREE.BASE_SIZE,
-                          transform=image_transform)
+
+    if cfg.DATASET_NAME == 'full_birds':
+        dataset = TextDataset(cfg.DATA_DIR, 'train',
+                              base_size=cfg.TREE.BASE_SIZE,
+                              transform=image_transform)
+    
+    elif cfg.DATASET_NAME == 'comp_birds':
+        dataset = TextDatasetCompCUB(
+                cfg.DATA_DIR,
+                'train',
+                base_size=cfg.TREE.BASE_SIZE,
+                transform=image_transform)
+
 
     print(dataset.n_words, dataset.embeddings_num)
     assert dataset
@@ -249,9 +259,19 @@ if __name__ == "__main__":
         shuffle=True, num_workers=int(cfg.WORKERS))
 
     # # validation data #
-    dataset_val = TextDataset(cfg.DATA_DIR, 'test',
-                              base_size=cfg.TREE.BASE_SIZE,
-                              transform=image_transform)
+    if cfg.DATASET_NAME == 'full_birds':
+        dataset_val = TextDataset(cfg.DATA_DIR, 'test',
+                                  base_size=cfg.TREE.BASE_SIZE,
+                                  transform=image_transform)
+
+    elif cfg.DATASET_NAME == 'comp_birds':
+        dataset_val = TextDatasetCompCUB(
+            cfg.DATA_DIR,
+            'val',
+            base_size=cfg.TREE.BASE_SIZE,
+            transform=image_transform
+        )
+
     dataloader_val = torch.utils.data.DataLoader(
         dataset_val, batch_size=batch_size, drop_last=True,
         shuffle=True, num_workers=int(cfg.WORKERS))
